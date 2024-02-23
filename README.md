@@ -15,7 +15,7 @@ It implements the distance metric outlined in "Improving Stability in Decision T
 
 ### Installation
 
-Install BackboneLearn using pip:
+Install dt-distance using pip:
 ```python
 pip install dt-distance
 ```
