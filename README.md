@@ -22,12 +22,26 @@ pip install dt-distance
 
 ### Usage
 ```
-from distance_calculator import DistanceCalculator
-# Initialize with two trained sklearn decision trees: tree1 and tree2
-calculator = DistanceCalculator(tree1, tree2)
+from dt_distance.distance_calculator import DistanceCalculator 
+from sklearn.datasets import load_breast_cancer
+from sklearn.tree import DecisionTreeClassifier
+from dt_distance.distance_calculator import DistanceCalcutor
+
+# Train trees
+tree1 = DecisionTreeClassifier(max_depth=1, random_state=0)
+tree2 = DecisionTreeClassifier(max_depth=2, random_state=1)
+tree1.fit(X, y)
+tree2.fit(X, y)
+
+# Initialize the DistanceCalculator with the two trees and the dataset
+distance_calculator = DistanceCalculator(tree1, tree2, X=X, y=y)
+
 # Compute the distance
-distance = calculator.compute_tree_distance()
-print(f"Distance: {distance}")
+distance_calculator.compute_tree_distance()
+
+print(f"The distance between the two decision trees is: {distance_calculator.distance}")
+
+print(f"The optimal path matching is: {distance_calculator.matching}")
 ```
 
 ### Main Parameters
