@@ -175,7 +175,7 @@ class DistanceCalculator:
         # Decode solution
         self._decode_soln()
         if self.normalize_distance:
-            self.distance = round(self._distance_normalized, ndigits=self.
+            self.distance = round(self._distance_normalized, ndigits=self.round_digits)
         else:
-            self.distance = self._distance_unnormalized
+            self.distance = round(self._distance_unnormalized, ndigits=self.round_digits)
         return self.distance
