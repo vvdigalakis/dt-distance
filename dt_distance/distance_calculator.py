@@ -1,9 +1,9 @@
 import numpy as np
 from scipy.optimize import linprog
-from .tree_parser import TreeConverter
+from .tree_parser import TreeParser
 from .data_processor import DataProcessor  # Used if X and y are provided
-from .path_extractor import compute_path_weight, compute_paths_distance
-from .problem_utils import ProblemParams  # Ensure you have this class defined appropriately
+from .path_extractor import PathExtractor, compute_paths_distance
+from .problem_params import ProblemParams  # Ensure you have this class defined appropriately
 
 class DistanceCalculator:
     """
@@ -36,14 +36,17 @@ class DistanceCalculator:
             data_processor = DataProcessor(data=X, target=y, dataset_name=dataset_name)
             self.problem_params = data_processor.get_problem_params()
 
-        # Automatically parse trees
-        self.paths_tree_1 = TreeConverter(tree1, self.problem_params).get_paths()
-        self.paths_tree_2 = TreeConverter(tree2, self.problem_params).get_paths()
+        # Check if input is list of paths or sklearn tree models
+        self.paths_tree_1 = self._check_and_convert_paths(tree1)
+        self.paths_tree_2 = self._check_and_convert_paths(tree2)
 
         # Distance calculation parameters
-        if max_depth == None:
-            max_depth = max(tree1.get_depth(), tree2.get_depth())  # Determine max_depth based on the trees
-        self.max_depth = max_depth
+        if max_depth == None and hasattr(tree1, 'get_depth') and hasattr(tree2, 'get_depth'):
+            self.max_depth = max(tree1.get_depth(), tree2.get_depth())  # Determine max_depth based on the trees
+        elif max_depth == None:
+            self.max_depth = 10
+        else:
+            self.max_depth = max_depth
         self.normalize_distance = normalize_distance
         self.outcome_weight_in_path = outcome_weight_in_path
         self.print_solver_output = print_solver_output
@@ -53,12 +56,18 @@ class DistanceCalculator:
         self.matching = None
         self.distance = np.nan
 
-    def _compute_paths_weights(self):
+    def _check_and_convert_paths(self, tree_or_paths):
         """
-        Compute path weights for both trees based on feature bounds and categories.
+        Checks if input is a list of PathExtractor instances or a tree model.
+        Converts dictionary paths to PathExtractor instances if necessary.
         """
-        self._w1 = {i: compute_path_weight(self.paths_tree_1[i], self.problem_params) for i in range(len(self.paths_tree_1))}
-        self._w2 = {i: compute_path_weight(self.paths_tree_2[i], self.problem_params) for i in range(len(self.paths_tree_2))}
+        if isinstance(tree_or_paths, list) and all(isinstance(item, PathExtractor) for item in tree_or_paths):
+            return tree_or_paths
+        elif isinstance(tree_or_paths, list):
+            # Convert dictionary paths to PathExtractor instances
+            return [PathExtractor(**path_dict) for path_dict in tree_or_paths]
+        else:
+            return TreeParser(tree_or_paths, self.problem_params).get_paths()
 
     def _compute_paths_distances(self):
         """
@@ -68,81 +77,56 @@ class DistanceCalculator:
         for i, path_i in enumerate(self.paths_tree_1):
             for j, path_j in enumerate(self.paths_tree_2):
                 self._D[(i, j)] = compute_paths_distance(path_i, path_j, self.problem_params, self.outcome_weight_in_path)
-
-    def _append_dummy_paths(self):
-        """
-        Append dummy paths to ensure both trees have the same number of paths for the optimization problem.
-        The distance between a real path and a dummy path is set to the weight of the real path.
-        """
-        self.n_paths_1 = len(self.paths_tree_1)
-        self.n_paths_2 = len(self.paths_tree_2)
-        self.n_paths = max(self.n_paths_1, self.n_paths_2)
-        # Update distances for dummy paths
-        for i in range(self.n_paths):
-            for j in range(self.n_paths):
-                if i >= self.n_paths_1:  # Dummy paths in tree 1
-                    self._D[(i, j)] = self._w2[j]  # Use the weight of the actual path from tree 2
-                elif j >= self.n_paths_2:  # Dummy paths in tree 2
-                    self._D[(i, j)] = self._w1[i]  # Use the weight of the actual path from tree 1
-
+    
     def _generate_lp_constraints(self, num_paths_1, num_paths_2):
         """
-        Generates linear programming constraints for path matching.
+        Generates linear programming constraints for path matching allowing multiple matches
+        for paths in the larger tree.
         """
-        A_eq = []
-        b_eq = [1] * (num_paths_1 + num_paths_2)
-        bounds = [(0, 1) for _ in range(num_paths_1 * num_paths_2)]
-
-        for i in range(num_paths_1):
-            A_eq.append([1 if j // num_paths_2 == i else 0 for j in range(num_paths_1 * num_paths_2)])
-        for j in range(num_paths_2):
-            A_eq.append([1 if i % num_paths_2 == j else 0 for i in range(num_paths_1 * num_paths_2)])
-
-        return A_eq, b_eq, bounds
-    
-    def _path_matching(self):
-        # Create the cost vector for the LP problem
-        c = [self._D.get((i, j), float('inf')) for i in range(self.n_paths) for j in range(self.n_paths)]
-        
-        # Constraints ensuring each path is matched exactly once
-        A_eq = []
-        b_eq = []
+        # Initialize the list for equality and inequality constraints
+        A_eq, A_inq = [], []
+        b_eq, b_inq = [], []
         bounds = []
-        
-        # Equality constraints for matching
-        for i in range(self.n_paths):
-            row = [1 if j // self.n_paths == i else 0 for j in range(self.n_paths**2)]
+
+        # Equality constraints ensuring each path in the smaller tree is matched exactly once
+        for i in range(num_paths_1):
+            row = [1 if j // num_paths_2 == i else 0 for j in range(num_paths_1 * num_paths_2)]
             A_eq.append(row)
             b_eq.append(1)
-        for j in range(self.n_paths):
-            col = [1 if i % self.n_paths == j else 0 for i in range(self.n_paths**2)]
-            A_eq.append(col)
-            b_eq.append(1)
+
+        # Inequality constraints allowing paths in the larger tree to match with multiple paths in the smaller tree
+        for j in range(num_paths_2):
+            col = [-1 if i % num_paths_2 == j else 0 for i in range(num_paths_1 * num_paths_2)]
+            A_inq.append(col)
+            b_inq.append(-1)
+
+        bounds = [(0, 1) for _ in range(num_paths_1 * num_paths_2)]
+
+        return A_eq, b_eq, A_inq, b_inq, bounds
+
+    def _path_matching(self):
+        """
+        Solves the path matching problem using linear programming, allowing for multiple
+        matches from the larger tree to the smaller tree's paths.
+        """
+        n_paths_1, n_paths_2 = len(self.paths_tree_1), len(self.paths_tree_2)
         
-        bounds = [(0, 1) for _ in range(self.n_paths**2)]
+        # Distinguish which tree has more paths to correctly apply the constraints
+        larger_tree_paths, smaller_tree_paths = (n_paths_2, n_paths_1) if n_paths_2 > n_paths_1 else (n_paths_1, n_paths_2)
         
-        # Solve the LP
-        result = linprog(c, A_eq=A_eq, b_eq=b_eq, bounds=bounds, method='highs', options={'disp': self.print_solver_output})
+        # Create the cost vector for the LP problem
+        c = [self._D.get((i, j), float('inf')) for i in range(smaller_tree_paths) for j in range(larger_tree_paths)]
+        
+        # Generate constraints
+        A_eq, b_eq, A_inq, b_inq, bounds = self._generate_lp_constraints(smaller_tree_paths, larger_tree_paths)
+        
+        # Solve the LP with both equality and inequality constraints
+        result = linprog(c, A_eq=A_eq, b_eq=b_eq, A_ub=A_inq, b_ub=b_inq, bounds=bounds, method='highs', options={'disp': self.print_solver_output})
         
         if not result.success:
             raise ValueError("LP didn't solve successfully.")
         
         self._soln = result.x
-
-
-    # def _path_matching(self):
-    #     """
-    #     Solves the path matching problem using linear programming with outcome weighting.
-    #     """
-    #     num_paths_1 = len(self.paths_tree_1)
-    #     num_paths_2 = len(self.paths_tree_2)
-    #     c = [self._D[(i, j)] for i in range(num_paths_1) for j in range(num_paths_2)]
-    #     A_eq, b_eq, bounds = self._generate_lp_constraints(num_paths_1, num_paths_2)
-
-    #     result = linprog(c, A_eq=A_eq, b_eq=b_eq, bounds=bounds, method='highs', options={'disp': self.print_solver_output})
-    #     if not result.success:
-    #         raise ValueError("LP didn't solve successfully.")
-    #     self._soln = result.x  # Store the solution vector for decoding
 
     def _decode_soln(self):
         """
@@ -169,10 +153,7 @@ class DistanceCalculator:
         """
         self.matching_done = True
         # Compute path weights and distances between all pairs of paths
-        self._compute_paths_weights()
         self._compute_paths_distances()
-        # Append dummy paths for tree with fewer paths
-        self._append_dummy_paths()
         # Run path matching
         self._path_matching()
         # Decode solution

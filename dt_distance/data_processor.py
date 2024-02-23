@@ -1,7 +1,8 @@
 import numpy as np
 import pandas as pd
 from sklearn import datasets
-from .problem_utils import ProblemParams
+from .problem_params import ProblemParams
+from .utils import determine_feature_type, determine_problem_type
 
 class DataProcessor:
     """
@@ -26,6 +27,7 @@ class DataProcessor:
         self.feature_names = feature_names
         self.feature_types = feature_types
         self.dataset_name = dataset_name
+        self.problem_type = None
         self.problem_params = None
         
         if dataset_name:
@@ -39,14 +41,16 @@ class DataProcessor:
         """
         if self.dataset_name == 'breast_cancer':
             dataset = datasets.load_breast_cancer()
-            problem_type = 'classification'
+            self.data, self.target = dataset.data, dataset.target
+            self.feature_names = dataset.feature_names
+            self.feature_types = {i: 'numerical' for i in range(self.data.shape[1])} 
+            self.problem_type = 'classification'
         # Add other predefined datasets here as elif blocks
+            
+        else:
+            raise ValueError("Unsupported predefined dataset.")
         
-        self.data, self.target = dataset.data, dataset.target
-        self.feature_names = dataset.feature_names
-        self.feature_types = {i: 'numerical' for i in range(self.data.shape[1])}  # Assume all features are numerical
-        
-        self._setup_problem_params(problem_type)
+        self._setup_problem_params()
 
     def _process_custom_data(self):
         """
@@ -56,15 +60,15 @@ class DataProcessor:
             raise ValueError("Custom data and target must be provided if no dataset name is given.")
         
         # Determine problem type based on the target array uniqueness
-        problem_type = 'classification' if np.unique(self.target).size > 2 else 'regression'
+        self.problem_type = determine_problem_type(self.target) 
         
         # Automatically determine feature types if not provided
         if not self.feature_types:
-            self.feature_types = {i: 'numerical' for i in range(self.data.shape[1])}
+            self.feature_types = {i: determine_feature_type(self.data[:, i]) for i in range(self.data.shape[1])}
         
-        self._setup_problem_params(problem_type)
+        self._setup_problem_params()
 
-    def _setup_problem_params(self, problem_type):
+    def _setup_problem_params(self):
         """
         Sets up problem parameters, including feature ranges and names.
         """
@@ -82,10 +86,10 @@ class DataProcessor:
             feature_lower_bounds=feature_lower_bounds,
             feature_upper_bounds=feature_upper_bounds,
             feature_num_categories=feature_num_categories,
-            problem_type=problem_type,
+            problem_type=self.problem_type,
             feature_names=self.feature_names,
-            response_upper_bound=np.max(self.target) if problem_type == 'regression' else None,
-            response_lower_bound=np.min(self.target) if problem_type == 'regression' else None
+            response_upper_bound=np.max(self.target) if self.problem_type == 'regression' else None,
+            response_lower_bound=np.min(self.target) if self.problem_type == 'regression' else None
         )
 
     def get_problem_params(self):

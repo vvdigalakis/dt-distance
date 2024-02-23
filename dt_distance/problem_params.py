@@ -9,7 +9,7 @@ class ProblemParams:
                  feature_num_categories, problem_type, feature_names=None, response_upper_bound=None,
                  response_lower_bound=None):
         self.feature_index = feature_index
-        self.feature_names = feature_names or []
+        self.feature_names = feature_names
         self.feature_types = feature_types
         self.feature_lower_bounds = feature_lower_bounds
         self.feature_upper_bounds = feature_upper_bounds

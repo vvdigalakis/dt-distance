@@ -2,7 +2,7 @@ from copy import deepcopy
 import numpy as np
 from .path_extractor import PathExtractor
 
-class TreeConverter:
+class TreeParser:
     """
     Class to convert a decision tree into a format suitable for path extraction and analysis,
     storing each path from root to leaf.

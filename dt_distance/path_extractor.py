@@ -62,24 +62,6 @@ class PathExtractor:
         self.path_node_ids.append(node_id)
         self.path_outcome = node_outcome
 
-def compute_path_weight(path, problem_params):
-    """
-    Computes the weight of a given path based on feature bounds and categories.
-
-    :param path: The path object for which to compute the weight.
-    :param problem_params: An instance of ProblemParams containing problem specifications.
-    :return: The computed weight of the path.
-    """
-    w = 0
-    for j in problem_params.feature_index:
-        if problem_params.feature_types[j] == 'numerical':
-            if (path.path_upper_bounds[j] != problem_params.feature_upper_bounds[j]) or (path.path_lower_bounds[j] != problem_params.feature_lower_bounds[j]):
-                w += (path.path_upper_bounds[j] - path.path_lower_bounds[j]) / (problem_params.feature_upper_bounds[j] - problem_params.feature_lower_bounds[j])
-        else:  # problem_params.feature_types[j] == 'categoric':
-            if sum(path.path_categories[j]) != problem_params.feature_num_categories[j]:
-                w += sum(path.path_categories[j]) / problem_params.feature_num_categories[j]
-    return w
-
 def compute_paths_distance(path_1, path_2, problem_params, outcome_weight=1):
     """
     Computes the distance between two paths, considering both feature bounds and outcomes.
@@ -93,15 +75,17 @@ def compute_paths_distance(path_1, path_2, problem_params, outcome_weight=1):
     d = 0
     for j in problem_params.feature_index:
         if problem_params.feature_types[j] == 'numerical':
-            u = abs(path_1.path_upper_bounds[j] - path_2.path_upper_bounds[j])
-            l = abs(path_1.path_lower_bounds[j] - path_2.path_lower_bounds[j])
-            d += (u + l) / (problem_params.feature_upper_bounds[j] - problem_params.feature_lower_bounds[j]) / 2
+            if j in path_1.path_upper_bounds and j in path_2.path_upper_bounds and j in path_1.path_lower_bounds and j in path_2.path_lower_bounds:
+                u = abs(path_1.path_upper_bounds[j] - path_2.path_upper_bounds[j])
+                l = abs(path_1.path_lower_bounds[j] - path_2.path_lower_bounds[j])
+                d += (u + l) / (problem_params.feature_upper_bounds[j] - problem_params.feature_lower_bounds[j]) / 2
         else:  # problem_params.feature_types[j] == 'categoric':
-            d += sum([c1 != c2 for c1, c2 in zip(path_1.path_categories[j], path_2.path_categories[j])]) / problem_params.feature_num_categories[j]
-
+            unique_categories_1 = set(path_1.path_categories[j])
+            unique_categories_2 = set(path_2.path_categories[j])
+            # Calculate the proportion of categories that are different
+            d += (len(unique_categories_1.union(unique_categories_2)) - len(unique_categories_1.intersection(unique_categories_2))) / problem_params.feature_num_categories[j]
     if problem_params.problem_type == 'classification':
         d += outcome_weight * 1 * (path_1.path_outcome != path_2.path_outcome)
     else:  # problem_params.problem_type == 'regression':
         d += outcome_weight * abs(path_1.path_outcome - path_2.path_outcome) / (problem_params.response_upper_bound - problem_params.response_lower_bound)
-
     return d
